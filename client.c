@@ -24,6 +24,7 @@
 #define MSG_QUERY       11
 #define MSG_QU_ACK      12
 #define MSG_MESSAGE     13
+#define MSG_LO_NACK     14
 
 // The message structure used between client and server.
 struct message {
@@ -66,6 +67,7 @@ void *receiver_thread(void *arg) {
         switch (msg.type) {
             case MSG_LO_ACK:
                 printf("[Server] Login successful.\n");
+                logged_in = true;
                 break;
             case MSG_NS_ACK:
                 printf("[Server] New session created successfully: %s\n", msg.data);
@@ -79,6 +81,10 @@ void *receiver_thread(void *arg) {
             case MSG_MESSAGE:
                 // Display broadcast message with sender ID.
                 printf("[%s] %s\n", msg.source, msg.data);
+                break;
+            case MSG_LO_NACK:
+                printf("[Server] Login NOT successful.\n");
+                logged_in = false;
                 break;
             default:
                 printf("[Server] Received message type %u: %s\n", msg.type, msg.data);
@@ -141,7 +147,7 @@ int main() {
             }
             // Send LOGIN message (password is sent as data).
             send_message(MSG_LOGIN, clientID, password);
-            logged_in = true;
+            //logged_in = true;
             // Start the receiver thread.
             pthread_create(&recv_tid, NULL, receiver_thread, NULL);
         }

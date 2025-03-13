@@ -26,6 +26,7 @@
 #define MSG_QUERY       11
 #define MSG_QU_ACK      12
 #define MSG_MESSAGE     13
+#define MSG_LO_NACK    14
 
 // The message structure used between client and server.
 struct message {
@@ -126,20 +127,34 @@ void *handle_client(void *arg) {
 
         switch (msg.type) {
             case MSG_LOGIN:
-                // For simplicity, we assume any login is accepted.
+                bool login = false;
                 pthread_mutex_lock(&clients_mutex);
                 {
                     client_t newClient;
                     newClient.sockfd = sockfd;
                     strncpy(newClient.clientID, (char *)msg.source, MAX_NAME - 1);
                     newClient.clientID[MAX_NAME - 1] = '\0';
+                    char passwordClient[MAX_PASSWORD];
+                    strncpy(passwordClient, (char*) msg.data, MAX_NAME - 1);
                     newClient.sessionID[0] = '\0'; // Not in any session initially.
                     strncpy(currentClientID, newClient.clientID, MAX_NAME - 1);
-                    clients[client_count++] = newClient;
+                    for (int i = 0; i < MAX_USERS; i++) {
+                        if (strcmp(users[i].username, newClient.clientID) == 0 && 
+                        strcmp(users[i].password, passwordClient) == 0) {
+                            clients[client_count++] = newClient;
+                            login = true;
+                        }
+                    }
                 }
                 pthread_mutex_unlock(&clients_mutex);
-                printf("Client %s logged in.\n", msg.source);
-                send_to_client(sockfd, MSG_LO_ACK, (char *)msg.source, "");
+                if (login == true) {
+                    printf("Client %s logged in.\n", msg.source);
+                    send_to_client(sockfd, MSG_LO_ACK, (char *)msg.source, "");
+                } else {
+                    printf("Client %s login failed.\n", msg.source);
+                    send_to_client(sockfd, MSG_LO_NACK, (char *)msg.source, "");
+                }
+                    
                 break;
             case MSG_EXIT:
                 printf("Client %s logged out.\n", msg.source);
@@ -147,7 +162,7 @@ void *handle_client(void *arg) {
                 goto cleanup;
                 break;
             case MSG_NEW_SESS:
-                // Create new session; simply set client's sessionID.
+                // Create new session; set client's sessionID.
                 pthread_mutex_lock(&clients_mutex);
                 for (int i = 0; i < client_count; i++) {
                     if (clients[i].sockfd == sockfd) {
@@ -164,28 +179,32 @@ void *handle_client(void *arg) {
                 // Client wants to join an existing session.
                 pthread_mutex_lock(&clients_mutex);
                 {
-                    for (int i = 0; i < client_count; i++) {
+                    int i;
+                    // check if session exists
+                    for (i = 0; i < client_count; i++) {
                         if (strcmp(clients[i].sessionID, (char *)msg.data) == 0) {
+                            // check if client is in a session
+                            for (int i = 0; i < client_count; i++) {
+                                if (clients[i].sockfd == sockfd) {
+                                    if (strlen(clients[i].sessionID) > 0) {
+                                        // Already in a session; reject join.
+                                        send_to_client(sockfd, MSG_JN_NAK, (char *)msg.source, "Already in a session.");
+                                        pthread_mutex_unlock(&clients_mutex);
+                                        goto next_iteration;
+                                    } else {
+                                        // not in a session and session exists then join
+                                        strncpy(clients[i].sessionID, (char *)msg.data, MAX_NAME - 1);
+                                        strncpy(currentSession, clients[i].sessionID, MAX_NAME - 1);
+                                        send_to_client(sockfd, MSG_JN_ACK, (char *)msg.source, clients[i].sessionID);
+                                        pthread_mutex_unlock(&clients_mutex);
+                                        goto next_iteration;
+                                    }
+                                }
+                            }
                             break;
                         }
                     }
-                    // For Section 1, allow joining if not already in a session.
-                    for (int i = 0; i < client_count; i++) {
-                        if (clients[i].sockfd == sockfd) {
-                            if (strlen(clients[i].sessionID) > 0) {
-                                // Already in a session; reject join.
-                                send_to_client(sockfd, MSG_JN_NAK, (char *)msg.source, "Already in a session.");
-                                pthread_mutex_unlock(&clients_mutex);
-                                goto next_iteration;
-                            } else {
-                                // If session not found, you might want to reject; here we allow creation on join.
-                                strncpy(clients[i].sessionID, (char *)msg.data, MAX_NAME - 1);
-                                strncpy(currentSession, clients[i].sessionID, MAX_NAME - 1);
-                                send_to_client(sockfd, MSG_JN_ACK, (char *)msg.source, clients[i].sessionID);
-                                break;
-                            }
-                        }
-                    }
+                    send_to_client(sockfd, MSG_JN_NAK, (char *)msg.source, "Session not available.");
                 }
                 pthread_mutex_unlock(&clients_mutex);
                 break;
