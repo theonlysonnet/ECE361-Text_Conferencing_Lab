@@ -9,7 +9,6 @@
 #define MAX_NAME 50
 #define MAX_DATA 256
 #define MAX_CLIENTS 20
-#define MAX_USERS 20
 #define MAX_PASSWORD 50
 
 // Message type definitions
@@ -26,7 +25,9 @@
 #define MSG_QUERY       11
 #define MSG_QU_ACK      12
 #define MSG_MESSAGE     13
-#define MSG_LO_NACK    14
+#define MSG_REGISTER    14
+#define MSG_REG_ACK     15
+#define MSG_REG_NAK     16
 
 // The message structure used between client and server.
 struct message {
@@ -42,22 +43,6 @@ typedef struct {
     char password[MAX_PASSWORD];
 } User;
 
-// Global array of users
-User users[MAX_USERS];
-
-// Function to initialize users
-void initialize_users() {
-    strcpy(users[0].username, "alice");     strcpy(users[0].password, "password1");
-    strcpy(users[1].username, "bob");       strcpy(users[1].password, "secure123");
-    strcpy(users[2].username, "charlie");   strcpy(users[2].password, "qwerty");
-    strcpy(users[3].username, "david");     strcpy(users[3].password, "letmein");
-    strcpy(users[4].username, "emma");      strcpy(users[4].password, "hello123");
-    strcpy(users[5].username, "frank");     strcpy(users[5].password, "hunter2");
-    strcpy(users[6].username, "grace");     strcpy(users[6].password, "iloveyou");
-    strcpy(users[7].username, "harry");     strcpy(users[7].password, "abc123");
-    strcpy(users[8].username, "isabel");    strcpy(users[8].password, "password");
-    strcpy(users[9].username, "jack");      strcpy(users[9].password, "welcome");
-}
 
 // Structure to hold client information.
 typedef struct {
@@ -138,13 +123,27 @@ void *handle_client(void *arg) {
                     strncpy(passwordClient, (char*) msg.data, MAX_NAME - 1);
                     newClient.sessionID[0] = '\0'; // Not in any session initially.
                     strncpy(currentClientID, newClient.clientID, MAX_NAME - 1);
-                    for (int i = 0; i < MAX_USERS; i++) {
-                        if (strcmp(users[i].username, newClient.clientID) == 0 && 
-                        strcmp(users[i].password, passwordClient) == 0) {
+                    
+                    FILE *userpass = fopen("userpass.txt", "r");
+                    if (userpass == NULL) {
+                        perror("Failed to open file.");
+                        continue;
+                    }
+                    // check if the username exists
+                    char line[101];
+                    while (fgets(line, sizeof(line), userpass) != NULL) {
+                        char *username = strtok(line, ":");
+                        char *password = strtok(NULL, ":");
+                        password[strcspn(password, "\n")] = '\0'; // null terminate it
+                        printf("%s (%d) : (%d) %s", username, strncmp(username, newClient.clientID, MAX_NAME), strncmp(password, passwordClient, MAX_PASSWORD), password);
+                        if (strncmp(username, newClient.clientID, MAX_NAME) == 0 &&
+                        strncmp(password, passwordClient, MAX_PASSWORD) == 0 && 
+                        client_count < MAX_CLIENTS) {
                             clients[client_count++] = newClient;
                             login = true;
                         }
                     }
+                    fclose(userpass);
                 }
                 pthread_mutex_unlock(&clients_mutex);
                 if (login == true) {
@@ -152,9 +151,59 @@ void *handle_client(void *arg) {
                     send_to_client(sockfd, MSG_LO_ACK, (char *)msg.source, "");
                 } else {
                     printf("Client %s login failed.\n", msg.source);
-                    send_to_client(sockfd, MSG_LO_NACK, (char *)msg.source, "");
+                    send_to_client(sockfd, MSG_LO_NAK, (char *)msg.source, "");
+                }    
+                break;
+            case MSG_REGISTER: 
+                FILE *userpass = fopen("userpass.txt", "r");
+                if (userpass == NULL) {
+                    perror("Failed to open file.");
+                    continue;
                 }
-                    
+                bool userExists = false;
+                // check if the username exists
+                char line[101];
+                while (fgets(line, sizeof(line), userpass) != NULL) {
+                    char *username = strtok(line, ":");
+                    //char *password = strtok(NULL, ":");
+                    if (strncmp(username, (char *)msg.source, MAX_NAME) == 0) {
+                        printf("Client %s already exists, can't register with same username\n", msg.source);
+                        send_to_client(sockfd, MSG_REG_NAK, (char *)msg.source, "");
+                        userExists = true;
+                        break;
+                    }
+                }
+                fclose(userpass);
+                // if username doesnt exist, add to the list in .txt file
+                if (userExists == false) {
+                    userpass = fopen("userpass.txt", "a");
+                    if (userpass == NULL) {
+                        perror("Could not open file");
+                        continue;
+                    }
+                    // create userpass string to append to to add to the txt file
+                    char newUserPass[101];
+                    snprintf(newUserPass, sizeof(newUserPass), "%s:%s\n", msg.source, msg.data);
+                    fprintf(userpass, "%s", newUserPass); // put into the txt file
+
+                    // return a user created
+                    pthread_mutex_lock(&clients_mutex);
+                    {
+                        client_t newClient;
+                        newClient.sockfd = sockfd;
+                        strncpy(newClient.clientID, (char *)msg.source, MAX_NAME - 1);
+                        newClient.clientID[MAX_NAME - 1] = '\0';
+                        char passwordClient[MAX_PASSWORD];
+                        strncpy(passwordClient, (char*) msg.data, MAX_NAME - 1);
+                        newClient.sessionID[0] = '\0'; // Not in any session initially.
+                        strncpy(currentClientID, newClient.clientID, MAX_NAME - 1);
+                        clients[client_count++] = newClient;
+                    }
+                    pthread_mutex_unlock(&clients_mutex);
+                    printf("Client %s created, and has been logged in.\n", msg.source);
+                    send_to_client(sockfd, MSG_REG_ACK, (char *)msg.source, "");
+                    fclose(userpass);
+                }   
                 break;
             case MSG_EXIT:
                 printf("Client %s logged out.\n", msg.source);
@@ -264,7 +313,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Usage: %s <server-port>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
-    initialize_users();
+    
     int port = atoi(argv[1]);
     int server_sock, client_sock;
     struct sockaddr_in server_addr, client_addr;

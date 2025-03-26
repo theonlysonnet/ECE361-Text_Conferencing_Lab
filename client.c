@@ -24,7 +24,9 @@
 #define MSG_QUERY       11
 #define MSG_QU_ACK      12
 #define MSG_MESSAGE     13
-#define MSG_LO_NACK     14
+#define MSG_REGISTER    14
+#define MSG_REG_ACK     15
+#define MSG_REG_NAK     16
 
 // The message structure used between client and server.
 struct message {
@@ -69,11 +71,18 @@ void *receiver_thread(void *arg) {
                 printf("[Server] Login successful.\n");
                 logged_in = true;
                 break;
+            case MSG_REG_ACK:
+                printf("[Server] User registration successful. Logged in.\n");
+                logged_in = true;
+                break;
             case MSG_NS_ACK:
                 printf("[Server] New session created successfully: %s\n", msg.data);
                 break;
             case MSG_JN_ACK:
                 printf("[Server] Joined session: %s\n", msg.data);
+                break;
+            case MSG_JN_NAK:
+                printf(printf("[Server] Session does not exist: %s\n", msg.data);)
                 break;
             case MSG_QU_ACK:
                 printf("[Server] List:\n%s\n", msg.data);
@@ -82,12 +91,16 @@ void *receiver_thread(void *arg) {
                 // Display broadcast message with sender ID.
                 printf("[%s] %s\n", msg.source, msg.data);
                 break;
-            case MSG_LO_NACK:
+            case MSG_LO_NAK:
                 printf("[Server] Login NOT successful.\n");
                 logged_in = false;
                 break;
+            case MSG_REG_NAK:
+                printf("[Server] User registration NOT successful. Username taken. Try again.\n");
+                logged_in = false;
+                break;
             default:
-                printf("[Server] Received message type %u: %s\n", msg.type, msg.data);
+                printf("[Server] Type %u: %s\n", msg.type, msg.data);
         }
     }
     return NULL;
@@ -100,6 +113,7 @@ int main() {
 
     printf("Welcome to the Text Conferencing Client.\n");
     printf("Commands:\n");
+    printf("  /register <clientID> <password> <server-IP> <server-port>\n");
     printf("  /login <clientID> <password> <server-IP> <server-port>\n");
     printf("  /logout\n");
     printf("  /createsession <sessionID>\n");
@@ -147,6 +161,40 @@ int main() {
             }
             // Send LOGIN message (password is sent as data).
             send_message(MSG_LOGIN, clientID, password);
+            //logged_in = true;
+            // Start the receiver thread.
+            pthread_create(&recv_tid, NULL, receiver_thread, NULL);
+        }
+        else if (strncmp(input, "/register", 9) == 0) {
+            if (logged_in) {
+                printf("Already logged in. Log out to register new user.\n");
+                continue;
+            }
+            // Expected format: /register <clientID> <password> <server-IP> <server-port>
+            char password[50], serverIP[50];
+            int port;
+            if (sscanf(input, "/register %s %s %s %d", clientID, password, serverIP, &port) != 4) {
+                printf("Invalid register command format.\n");
+                continue;
+            }
+            // Create socket.
+            sockfd = socket(AF_INET, SOCK_STREAM, 0);
+            if (sockfd < 0) {
+                perror("Socket creation failed");
+                continue;
+            }
+            struct sockaddr_in serv_addr;
+            serv_addr.sin_family = AF_INET;
+            serv_addr.sin_port = htons(port);
+            serv_addr.sin_addr.s_addr = inet_addr(serverIP);
+            if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+                perror("Connection failed");
+                close(sockfd);
+                sockfd = -1;
+                continue;
+            }
+            // Send REGISTER message (password is sent as data).
+            send_message(MSG_REGISTER, clientID, password);
             //logged_in = true;
             // Start the receiver thread.
             pthread_create(&recv_tid, NULL, receiver_thread, NULL);
