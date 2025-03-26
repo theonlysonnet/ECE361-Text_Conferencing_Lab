@@ -5,11 +5,13 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <time.h>
 
 #define MAX_NAME 50
 #define MAX_DATA 256
 #define MAX_CLIENTS 20
 #define MAX_PASSWORD 50
+#define TIMEOUT 20 // 60 seconds for timeout
 
 // Message type definitions
 #define MSG_LOGIN       1
@@ -28,6 +30,7 @@
 #define MSG_REGISTER    14
 #define MSG_REG_ACK     15
 #define MSG_REG_NAK     16
+#define MSG_INACTIVITY  17
 
 // The message structure used between client and server.
 struct message {
@@ -42,6 +45,7 @@ typedef struct {
     int sockfd;
     char clientID[MAX_NAME];
     char sessionID[MAX_NAME];  // empty string if not in a session
+    time_t last_active_time;
 } client_t;
 
 client_t clients[MAX_CLIENTS];
@@ -103,6 +107,16 @@ void *handle_client(void *arg) {
             break;
         }
 
+        // Update last active time
+        pthread_mutex_lock(&clients_mutex);
+        for (int i = 0; i < client_count; i++) {
+            if (clients[i].sockfd == sockfd) {
+                clients[i].last_active_time = time(NULL);
+                break;
+            }
+        }
+        pthread_mutex_unlock(&clients_mutex);
+
         switch (msg.type) {
             case MSG_LOGIN:
                 bool login = false;
@@ -128,7 +142,7 @@ void *handle_client(void *arg) {
                         char *username = strtok(line, ":");
                         char *password = strtok(NULL, ":");
                         password[strcspn(password, "\n")] = '\0'; // null terminate it
-                        printf("%s (%d) : (%d) %s", username, strncmp(username, newClient.clientID, MAX_NAME), strncmp(password, passwordClient, MAX_PASSWORD), password);
+                        //printf("%s (%d) : (%d) %s", username, strncmp(username, newClient.clientID, MAX_NAME), strncmp(password, passwordClient, MAX_PASSWORD), password);
                         if (strncmp(username, newClient.clientID, MAX_NAME) == 0 &&
                         strncmp(password, passwordClient, MAX_PASSWORD) == 0 && 
                         client_count < MAX_CLIENTS) {
@@ -301,6 +315,44 @@ cleanup:
     return NULL;
 }
 
+
+
+void *inactivity_timer(void *arg) {
+    while (1) {
+        time_t now = time(NULL);
+
+        pthread_mutex_lock(&clients_mutex); {
+            for (int i=0; i < client_count; i++) {
+                // get how long they each client in inactive
+                double seconds_inactive = difftime(now, clients[i].last_active_time);
+                
+                if (seconds_inactive >= TIMEOUT) {
+                    printf("Client %s has been kicked out for inactivity. Disconnecting.\n", clients[i].clientID);
+                    send_to_client(clients[i].sockfd, MSG_INACTIVITY, clients[i].clientID, "Disconnected due to inactivity.");
+                    
+                    int kicked_sock = clients[i].sockfd;
+
+                    // Shift remaining clients down
+                    for (int j = i; j < client_count - 1; j++) {
+                        clients[j] = clients[j + 1];
+                    }
+                    client_count--;
+
+                    // Close socket *after* modifying the array
+                    close(kicked_sock);
+
+                    // Decrement i to stay at the same index after removal
+                    i--;
+                }
+            }
+        }
+        pthread_mutex_unlock(&clients_mutex);
+        sleep(30); // check every 30 seconds
+    } 
+
+    return NULL;  
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <server-port>\n", argv[0]);
@@ -333,6 +385,10 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
     printf("Server listening on port %d...\n", port);
+
+    // creating a thread to check for inactivity
+    pthread_t timer_thread;
+    pthread_create(&timer_thread, NULL, inactivity_timer, NULL);
 
     // Accept clients.
     while (1) {

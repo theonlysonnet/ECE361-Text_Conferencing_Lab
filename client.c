@@ -27,6 +27,7 @@
 #define MSG_REGISTER    14
 #define MSG_REG_ACK     15
 #define MSG_REG_NAK     16
+#define MSG_INACTIVITY  17
 
 // The message structure used between client and server.
 struct message {
@@ -97,6 +98,10 @@ void *receiver_thread(void *arg) {
                 break;
             case MSG_REG_NAK:
                 printf("[Server] User registration NOT successful. Username taken. Try again.\n");
+                logged_in = false;
+                break;
+            case MSG_INACTIVITY:
+                printf("[Server] You have been kicked out due to inactivity. Login again to continue.");
                 logged_in = false;
                 break;
             default:
