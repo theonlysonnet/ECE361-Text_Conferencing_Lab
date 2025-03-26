@@ -37,13 +37,6 @@ struct message {
     unsigned char data[MAX_DATA];
 };
 
-// Structure to hold user credentials
-typedef struct {
-    char username[MAX_NAME];
-    char password[MAX_PASSWORD];
-} User;
-
-
 // Structure to hold client information.
 typedef struct {
     int sockfd;

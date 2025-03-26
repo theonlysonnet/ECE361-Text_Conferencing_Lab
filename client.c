@@ -82,7 +82,7 @@ void *receiver_thread(void *arg) {
                 printf("[Server] Joined session: %s\n", msg.data);
                 break;
             case MSG_JN_NAK:
-                printf(printf("[Server] Session does not exist: %s\n", msg.data);)
+                printf("[Server] Session does not exist: %s\n", msg.data);
                 break;
             case MSG_QU_ACK:
                 printf("[Server] List:\n%s\n", msg.data);
