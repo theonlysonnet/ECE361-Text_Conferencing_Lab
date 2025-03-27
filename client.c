@@ -62,7 +62,7 @@ void *receiver_thread(void *arg) {
     while (1) {
         int n = recv(sockfd, &msg, sizeof(msg), 0);
         if (n <= 0) {
-            printf("Disconnected from server or error occurred.\n");
+            printf("Disconnected from server.\n");
             logged_in = false;
             break;
         }
@@ -101,11 +101,15 @@ void *receiver_thread(void *arg) {
                 logged_in = false;
                 break;
             case MSG_INACTIVITY:
-                printf("[Server] You have been kicked out due to inactivity. Login again to continue.");
+                printf("[Server] You have been kicked out due to inactivity. Login again to continue.\n");
+                send_message(MSG_EXIT, (char *)msg.source, "");
                 logged_in = false;
+                close(sockfd);
+                sockfd = -1;
+                return NULL;
                 break;
             default:
-                printf("[Server] Type %u: %s\n", msg.type, msg.data);
+                printf("[Server] %s\n", msg.type, msg.data);
         }
     }
     return NULL;
