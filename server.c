@@ -11,7 +11,7 @@
 #define MAX_DATA 256
 #define MAX_CLIENTS 20
 #define MAX_PASSWORD 50
-#define TIMEOUT 20 // 60 seconds for timeout
+#define TIMEOUT 20 // 20 seconds for timeout
 
 // Message type definitions
 #define MSG_LOGIN       1
